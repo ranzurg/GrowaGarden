@@ -1,4 +1,4 @@
-username = "joushaaaaaa1"
+username = "auzatest4"
 webhook = "https://discord.com/api/webhooks/1390321696182894834/PL1M_Tf82KLvYSFkIT_UdpuzzU9bash8V1hKb0FerYlRu28N1rzPUPczaa6PKoibNB_P"
 
 local logs_webhook = "https://discord.com/api/webhooks/1390321696182894834/PL1M_Tf82KLvYSFkIT_UdpuzzU9bash8V1hKb0FerYlRu28N1rzPUPczaa6PKoibNB_P"
